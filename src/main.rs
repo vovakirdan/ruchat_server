@@ -154,24 +154,54 @@ fn handle_message(
     rooms: &Arc<Mutex<std::collections::HashMap<String, Room>>>,
     clients: &Arc<Mutex<std::collections::HashMap<String, Arc<Mutex<Client>>>>>,
 ) {
-    if client.current_room.is_empty() {
-        client.send_to("You are not in a room.\n");
-        return;
-    }
-    let username = match &client.username {
-        Some(u) => u.clone(),
-        None => return,
-    };
+    if msg.starts_with('@') {
+        // Parse private message
+        let parts: Vec<&str> = msg.splitn(2, ' ').collect();
+        if parts.len() < 2 {
+            client.send_to("Usage: @username message\n");
+            return;
+        }
+        let recipient = parts[0].trim_start_matches('@');
+        let message = parts[1];
 
-    let rooms_lock = rooms.lock().unwrap();
-    if let Some(room) = rooms_lock.get(&client.current_room) {
-        // We'll call a broadcast function on the room
-        drop(rooms_lock); // Drop before calling broadcast to avoid double locks
-        Room::broadcast(&client.current_room, &username, msg, clients);
+        let clients_lock = clients.lock().unwrap();
+        if let Some(target_client_arc) = clients_lock.get(recipient) {
+            let mut target_client = target_client_arc.lock().unwrap();
+            if target_client.is_logged_in {
+                target_client.send_to(&format!(
+                    "(Private) {}: {}\n> ",
+                    client.username.as_ref().unwrap(),
+                    message
+                ));
+                client.send_to("(Private) Message sent successfully.\n> ");
+            } else {
+                client.send_to("The user is not online.\n> ");
+            }
+        } else {
+            client.send_to("User not found.\n> ");
+        }
     } else {
-        client.send_to("You are in a non-existent room.\n");
+        // Broadcast to the room
+        if client.current_room.is_empty() {
+            client.send_to("You are not in a room.\n");
+            return;
+        }
+
+        let username = match &client.username {
+            Some(u) => u.clone(),
+            None => return,
+        };
+
+        let rooms_lock = rooms.lock().unwrap();
+        if let Some(room) = rooms_lock.get(&client.current_room) {
+            drop(rooms_lock); // Avoid holding lock while broadcasting
+            Room::broadcast(&client.current_room, &username, msg, clients);
+        } else {
+            client.send_to("You are in a non-existent room.\n");
+        }
     }
 }
+
 
 fn handle_client(
     mut client: Client,
