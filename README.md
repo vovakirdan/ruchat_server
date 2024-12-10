@@ -35,8 +35,8 @@ A multi-threaded chatroom server written in Rust, allowing users to communicate 
 
 1. **Clone the Repository**:
    ```bash
-   git clone <repository_url>
-   cd chatroom
+   git clone https://github.com/vovakirdan/ruchat_server.git
+   cd ruchat_server
    ```
 
 2. **Build the Project**:
