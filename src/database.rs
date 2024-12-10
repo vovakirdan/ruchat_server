@@ -32,6 +32,12 @@ impl Database {
         Err("User not found.".to_string())
     }
 
+    pub fn logout(&mut self, username: &str) {
+        if let Some(user) = self.users.get_mut(username) {
+            user.is_online = false;
+        }
+    }
+
     pub fn list_users(&self) -> Vec<String> {
         self.users
             .values()
