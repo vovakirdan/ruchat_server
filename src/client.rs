@@ -5,12 +5,19 @@ use std::io::Write;
 pub struct Client {
     pub address: String,
     pub stream: TcpStream,
+    pub is_logged_in: bool,
+    pub username: Option<String>,
 }
 
 impl Client {
     pub fn new(stream: TcpStream) -> Self {
         let address = stream.peer_addr().unwrap().to_string();
-        Self { address, stream }
+        Self {
+            address,
+            stream,
+            is_logged_in: false,
+            username: None,
+        }
     }
 
     // function to send a message to client

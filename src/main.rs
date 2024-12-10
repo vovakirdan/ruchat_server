@@ -14,8 +14,8 @@ use database::Database;
 fn handle_client(mut client: Client, db: Arc<Mutex<Database>>) {
     let mut buffer = [0; 512];
 
-    // Send a welcome message to the new client
-    client.send_to("Welcome to the chat server! Please log in or register.\n");
+    client.send_to("Welcome to the chat server!\n");
+    client.send_to("1. Sign up\n2. Sign in\nPlease choose (1|2): ");
 
     loop {
         let bytes_read = match client.stream.read(&mut buffer) {
@@ -31,41 +31,70 @@ fn handle_client(mut client: Client, db: Arc<Mutex<Database>>) {
         };
 
         let input = String::from_utf8_lossy(&buffer[..bytes_read]).trim().to_string();
-        println!("Received from {}: {}", client.address, input);
 
-        let response = match input.split_once(' ') {
-            Some(("register", args)) => {
-                let (username, password) = match args.split_once(' ') {
-                    Some((u, p)) => (u, p),
-                    None => return client.send_to("Usage: register <username> <password>\n"),
-                };
-
-                let mut db = db.lock().unwrap();
-                db.register(username, password).unwrap_or_else(|e| e)
+        if !client.is_logged_in {
+            match input.as_str() {
+                "1" => {
+                    client.send_to("Enter a username: ");
+                    if let Ok(n) = client.stream.read(&mut buffer) {
+                        let username = String::from_utf8_lossy(&buffer[..n]).trim().to_string();
+                        client.send_to("Enter a password: ");
+                        if let Ok(p) = client.stream.read(&mut buffer) {
+                            let password = String::from_utf8_lossy(&buffer[..p]).trim().to_string();
+                            let mut db = db.lock().unwrap();
+                            match db.register(&username, &password) {
+                                Ok(msg) => {
+                                    client.send_to(&format!("{}\n", msg));
+                                    client.username = Some(username);
+                                    client.is_logged_in = true;
+                                    client.send_to("You are now logged in.\n");
+                                }
+                                Err(err) => client.send_to(&format!("{}\n", err)),
+                            }
+                        }
+                    }
+                }
+                "2" => {
+                    client.send_to("Enter your username: ");
+                    if let Ok(n) = client.stream.read(&mut buffer) {
+                        let username = String::from_utf8_lossy(&buffer[..n]).trim().to_string();
+                        client.send_to("Enter your password: ");
+                        if let Ok(p) = client.stream.read(&mut buffer) {
+                            let password = String::from_utf8_lossy(&buffer[..p]).trim().to_string();
+                            let mut db = db.lock().unwrap();
+                            match db.login(&username, &password) {
+                                Ok(msg) => {
+                                    client.send_to(&format!("{}\n", msg));
+                                    client.username = Some(username);
+                                    client.is_logged_in = true;
+                                }
+                                Err(err) => client.send_to(&format!("{}\n", err)),
+                            }
+                        }
+                    }
+                }
+                _ => client.send_to("Unknown command. Please choose (1|2): "),
             }
-            Some(("login", args)) => {
-                let (username, password) = match args.split_once(' ') {
-                    Some((u, p)) => (u, p),
-                    None => return client.send_to("Usage: login <username> <password>\n"),
-                };
+        }
 
-                let mut db = db.lock().unwrap();
-                db.login(username, password).unwrap_or_else(|e| e)
-            }
-            Some(("list", _)) => {
-                let db = db.lock().unwrap();
-                db.list_users().join("\n")
-            }
-            _ => "Unknown command. Use 'register', 'login', or 'list'.".to_string(),
-        };
+        if client.is_logged_in {
+            client.send_to("Welcome to the main room...\n");
+            client.send_to("Instructions:\n- Use 'list' to see online users.\n- Use '@username message' to send private messages.\n");
 
-        client.send_to(&format!("{}\n", response));
+            let db = db.lock().unwrap();
+            let users = db.list_users();
+            client.send_to("Current users:\n");
+            client.send_to(&format!("{}\n", users.join("\n")));
+
+            return; // Exit loop after login and setup
+        }
     }
 }
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
     println!("Server is running on 127.0.0.1:7878");
+    println!("run nc 127.0.0.1 787 to connect");
 
     let db = Arc::new(Mutex::new(Database::new()));
 
