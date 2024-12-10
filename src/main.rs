@@ -4,9 +4,9 @@ mod database;
 mod client;
 
 use std::net::TcpListener;
-use std::collections::HashMap;
-use std::io::Read;
+// use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::io::Read;
 use std::thread;
 
 use client::Client;
@@ -27,10 +27,28 @@ fn parse_command(
 
     match parts[0] {
         "/list" => {
-            let db = db.lock().unwrap();
-            let users = db.list_users();
-            client.send_to("Current users:\n");
-            client.send_to(&format!("{}\n", users.join("\n")));
+            if parts.len() < 2 {
+                client.send_to("Usage: /list <users|rooms>\n");
+                return;
+            }
+
+            match parts[1] {
+                "users" => {
+                    let db = db.lock().unwrap();
+                    let users = db.list_users();
+                    client.send_to("Online/Offline Users:\n");
+                    client.send_to(&format!("{}\n", users.join("\n")));
+                }
+                "rooms" => {
+                    let rooms_lock = rooms.lock().unwrap();
+                    let room_names: Vec<String> = rooms_lock.keys().cloned().collect();
+                    client.send_to("Available Rooms:\n");
+                    client.send_to(&format!("{}\n", room_names.join("\n")));
+                }
+                _ => {
+                    client.send_to("Invalid argument. Use '/list users' or '/list rooms'.\n");
+                }
+            }
         }
         "/q" => {
             // Log out but keep connection open
