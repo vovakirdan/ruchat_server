@@ -35,7 +35,13 @@ impl Database {
     pub fn list_users(&self) -> Vec<String> {
         self.users
             .values()
-            .map(|user| format!("{} (online: {})", user.username, user.is_online))
+            .map(|user| {
+                if user.is_online {
+                    format!("{} online", user.username)
+                } else {
+                    format!("{} offline", user.username)
+                }
+            })
             .collect()
     }
 }
