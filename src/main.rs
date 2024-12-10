@@ -13,6 +13,23 @@ use client::Client;
 use database::Database;
 use room::Room;
 
+const COMMANDS: &[&str] = &[
+    "/list - List all users",
+    "/cr <room_name> - Create a room",
+    "/sr <room_name> - Switch to a room",
+    "/q - Logout",
+    "/disconnect - Disconnect",
+    "@username message - Send a private message",
+    "/list_rooms - List all rooms",
+];
+
+pub fn display_help(client: &mut Client) {
+    client.send_to("Available commands:\n");
+    for cmd in COMMANDS {
+        client.send_to(&format!("{}\n", cmd));
+    }
+}
+
 fn parse_command(
     cmd: &str,
     client: &mut Client,
@@ -26,6 +43,9 @@ fn parse_command(
     }
 
     match parts[0] {
+        "/help" => {
+            display_help(client);
+        }
         "/list" => {
             if parts.len() < 2 {
                 client.send_to("Usage: /list <users|rooms>\n");
