@@ -32,15 +32,12 @@ impl Room {
         message: &str,
         clients: &Arc<Mutex<HashMap<String, Arc<Mutex<Client>>>>>
     ) {
-        // For each member in the room, except sender, send the message
-        let map = clients.lock().unwrap();
-        for (_, client_arc) in map.iter() {
-            let mut c = client_arc.lock().unwrap();
-            if let Some(u) = &c.username {
-                if u != sender && c.current_room == room_name && c.is_logged_in {
-                    c.send_to(&format!("{}: {}\n", sender, message));
-                }
+        let clients_lock = clients.lock().unwrap();
+        for (_, client_arc) in clients_lock.iter() {
+            let mut client = client_arc.lock().unwrap();
+            if client.current_room == room_name && client.is_logged_in && client.username.as_deref() != Some(sender) {
+                client.send_to(&format!("{}: {}\n", sender, message));
             }
         }
-    }
+    }    
 }

@@ -4,6 +4,7 @@ mod database;
 mod client;
 
 use std::net::TcpListener;
+use std::collections::HashMap;
 use std::io::Read;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -115,7 +116,7 @@ fn parse_command(
                 }
                 // Add user to new room
                 if let Some(new_room) = rooms_lock.get_mut(room_name) {
-                    new_room.add_member(username.to_string());
+                    new_room.add_member(username.clone());
                 }
 
                 client.current_room = room_name.to_string();
@@ -133,9 +134,8 @@ fn handle_message(
     msg: &str,
     client: &mut Client,
     rooms: &Arc<Mutex<std::collections::HashMap<String, Room>>>,
-    clients: &Arc<Mutex<std::collections::HashMap<String, Arc<Mutex<Client>>>>>
+    clients: &Arc<Mutex<std::collections::HashMap<String, Arc<Mutex<Client>>>>>,
 ) {
-    // Broadcast the message to the current room
     if client.current_room.is_empty() {
         client.send_to("You are not in a room.\n");
         return;
@@ -159,7 +159,7 @@ fn handle_client(
     mut client: Client,
     db: Arc<Mutex<Database>>,
     rooms: Arc<Mutex<std::collections::HashMap<String, Room>>>,
-    clients: Arc<Mutex<std::collections::HashMap<String, Arc<Mutex<Client>>>>>
+    clients: Arc<Mutex<std::collections::HashMap<String, Arc<Mutex<Client>>>>>,
 ) {
     let mut buffer = [0; 512];
 
@@ -186,151 +186,90 @@ fn handle_client(
 
         let input = String::from_utf8_lossy(&buffer[..bytes_read]).trim().to_string();
 
-        // If not logged in, handle registration / login
+        // If not logged in, prompt for login or registration
         if !client.is_logged_in {
             match input.as_str() {
                 "1" => {
-                    // Registration
                     client.send_to("Enter a username: ");
-                    let username = match client.stream.read(&mut buffer) {
-                        Ok(0) => {
-                            println!("Client {} disconnected during registration username input.", client.address);
-                            return;
-                        }
-                        Ok(n) => String::from_utf8_lossy(&buffer[..n]).trim().to_string(),
-                        Err(e) => {
-                            eprintln!("Error reading username: {}", e);
-                            return;
-                        }
-                    };
-
+                    let username = read_client_input(&mut client);
                     client.send_to("Enter a password: ");
-                    let password = match client.stream.read(&mut buffer) {
-                        Ok(0) => {
-                            println!("Client {} disconnected during password input.", client.address);
-                            return;
-                        }
-                        Ok(p) => String::from_utf8_lossy(&buffer[..p]).trim().to_string(),
-                        Err(e) => {
-                            eprintln!("Error reading password: {}", e);
-                            return;
-                        }
-                    };
+                    let password = read_client_input(&mut client);
 
                     let mut db = db.lock().unwrap();
                     match db.register(&username, &password) {
                         Ok(msg) => {
                             client.send_to(&format!("{}\n", msg));
-                            client.username = Some(username.clone());
                             client.is_logged_in = true;
-                            client.send_to("You are now logged in.\n");
-                            // Add client to global clients map
-                            clients.lock().unwrap().insert(username.clone(), Arc::new(Mutex::new(client.clone())));
+                            client.username = Some(username.clone());
+                            client.current_room = "main".to_string();
 
-                            // Join main room
-                            {
-                                let mut rooms_lock = rooms.lock().unwrap();
-                                let main_room = rooms_lock.get_mut("main").unwrap();
-                                main_room.add_member(username.clone());
-                                client.current_room = "main".to_string();
-                            }
+                            // Add user to global map and room
+                            clients.lock().unwrap().insert(username.clone(), Arc::new(Mutex::new(client.clone())));
+                            let mut rooms_lock = rooms.lock().unwrap();
+                            rooms_lock.get_mut("main").unwrap().add_member(username);
+                            client.send_to("You have joined the 'main' room.\n");
                         }
                         Err(err) => {
                             client.send_to(&format!("{}\n", err));
-                            client.send_to("1. Sign up\n2. Sign in\nPlease choose (1|2): ");
-                            continue;
                         }
                     }
                 }
                 "2" => {
-                    // Login
                     client.send_to("Enter your username: ");
-                    let username = match client.stream.read(&mut buffer) {
-                        Ok(0) => {
-                            println!("Client {} disconnected during login username input.", client.address);
-                            return;
-                        }
-                        Ok(n) => String::from_utf8_lossy(&buffer[..n]).trim().to_string(),
-                        Err(e) => {
-                            eprintln!("Error reading username: {}", e);
-                            return;
-                        }
-                    };
-
+                    let username = read_client_input(&mut client);
                     client.send_to("Enter your password: ");
-                    let password = match client.stream.read(&mut buffer) {
-                        Ok(0) => {
-                            println!("Client {} disconnected during password input.", client.address);
-                            return;
-                        }
-                        Ok(p) => String::from_utf8_lossy(&buffer[..p]).trim().to_string(),
-                        Err(e) => {
-                            eprintln!("Error reading password: {}", e);
-                            return;
-                        }
-                    };
+                    let password = read_client_input(&mut client);
 
                     let mut db = db.lock().unwrap();
                     match db.login(&username, &password) {
                         Ok(msg) => {
                             client.send_to(&format!("{}\n", msg));
-                            client.username = Some(username.clone());
                             client.is_logged_in = true;
-                            // Add client to global clients map
-                            clients.lock().unwrap().insert(username.clone(), Arc::new(Mutex::new(client.clone())));
-
-                            // Join main room by default
-                            let mut rooms_lock = rooms.lock().unwrap();
-                            let main_room = rooms_lock.get_mut("main").unwrap();
-                            main_room.add_member(username.clone());
+                            client.username = Some(username.clone());
                             client.current_room = "main".to_string();
+
+                            // Add user to global map and room
+                            clients.lock().unwrap().insert(username.clone(), Arc::new(Mutex::new(client.clone())));
+                            let mut rooms_lock = rooms.lock().unwrap();
+                            rooms_lock.get_mut("main").unwrap().add_member(username);
+                            client.send_to("You have joined the 'main' room.\n");
                         }
                         Err(err) => {
                             client.send_to(&format!("{}\n", err));
-                            client.send_to("1. Sign up\n2. Sign in\nPlease choose (1|2): ");
-                            continue;
                         }
                     }
                 }
                 _ => {
-                    client.send_to("Unknown command. Please choose (1|2): ");
-                    continue;
+                    client.send_to("Invalid choice. Please choose 1 (Sign up) or 2 (Sign in).\n");
                 }
             }
+            continue; // Skip further processing until logged in
+        }
 
-            // Show main room info and enter command loop
-            client.send_to("Welcome to the main room...\n");
-            client.send_to("Instructions:\n- Use '/list' to see current users.\n- Use '@username message' to send private messages.\n");
-            client.send_to("Commands:\n- '/q' to log out\n- '/disconnect' to log out and disconnect\n");
-            client.send_to("Room commands:\n- '/cr <room_name>' to create a room\n- '/sr <room_name>' or '/switch_room <room_name>' to switch rooms\n");
-            client.send_to("> ");
-        } else {
-            // Logged in: parse commands or treat as message
-            if input.starts_with('/') {
-                parse_command(&input, &mut client, &db, &rooms, &clients);
-                if client.mark_disconnected {
-                    return;
-                }
-
-                // If logged out by /q, wait for further login/signup commands
-                if !client.is_logged_in {
-                    continue;
-                }
-            } else if input.starts_with('@') {
-                // Private messaging not implemented in detail, just a placeholder
-                client.send_to("Private messaging not implemented yet.\n");
-            } else if !input.is_empty() {
-                // Treat as message to the room
-                handle_message(&input, &mut client, &rooms, &clients);
-            }
-
+        // If logged in, check for commands or broadcast message
+        if input.starts_with('/') {
+            parse_command(&input, &mut client, &db, &rooms, &clients);
             if client.mark_disconnected {
                 return;
             }
+        } else if !input.is_empty() {
+            // Broadcast message to the current room
+            handle_message(&input, &mut client, &rooms, &clients);
+        }
 
-            if client.is_logged_in {
-                client.send_to("> ");
-            }
+        if client.is_logged_in {
+            client.send_to("> ");
+        }
+    }
+}
+
+fn read_client_input(client: &mut Client) -> String {
+    let mut buffer = [0; 512];
+    match client.stream.read(&mut buffer) {
+        Ok(n) => String::from_utf8_lossy(&buffer[..n]).trim().to_string(),
+        Err(_) => {
+            client.send_to("Error reading input. Please try again.\n");
+            String::new()
         }
     }
 }
