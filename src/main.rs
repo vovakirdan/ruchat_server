@@ -293,7 +293,16 @@ fn read_client_input(client: &mut Client) -> String {
 }
 
 fn main() {
-    let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
+    // let is_running = Arc::new(AtomicBool::new(true));
+    // let is_running_clone = Arc::clone(&is_running);
+
+    // ctrlc::set_handler(move || {
+    //     println!("\nReceived shutdown signal. Closing server...");
+    //     is_running_clone.store(false, Ordering::SeqCst);
+    // })
+    // .expect("Error setting Ctrl-C handler");
+
+    let listener = TcpListener::bind("127.0.0.1:7878").expect("Failed to bind to address");
     println!("Server is running on 127.0.0.1:7878");
     println!("Use 'nc 127.0.0.1 7878' or 'telnet 127.0.0.1 7878' to connect");
 
@@ -308,6 +317,9 @@ fn main() {
     let clients = Arc::new(Mutex::new(std::collections::HashMap::new()));
 
     for stream in listener.incoming() {
+        // if !is_running.load(Ordering::SeqCst) {
+        //     break;
+        // }
         match stream {
             Ok(stream) => {
                 let address = stream.peer_addr().unwrap().to_string();
@@ -321,4 +333,9 @@ fn main() {
             Err(e) => eprintln!("Connection failed: {}", e),
         }
     }
+
+
+    // println!("Waiting for threads to finish...");
+    // thread::sleep(std::time::Duration::from_secs(1)); // Give threads time to finish
+    // println!("Server shut down gracefully.");
 }
