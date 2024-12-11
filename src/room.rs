@@ -26,6 +26,10 @@ impl Room {
         self.members.retain(|u| u != username);
     }
 
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+
     pub fn broadcast(
         room_name: &str,
         sender: &str,
@@ -41,5 +45,5 @@ impl Room {
         }
         // Print to the server's console for logging/debugging
         println!("[{}] {}: {}", room_name, sender, message);
-    }      
+    }
 }

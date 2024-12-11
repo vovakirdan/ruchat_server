@@ -212,16 +212,20 @@ fn handle_message(
             None => return,
         };
 
-        let rooms_lock = rooms.lock().unwrap();
-        if let Some(room) = rooms_lock.get(&client.current_room) {
-            drop(rooms_lock); // Avoid holding lock while broadcasting
-            Room::broadcast(&client.current_room, &username, msg, clients);
-        } else {
-            client.send_to("You are in a non-existent room.\n");
-        }
+        let room_name = {
+            let rooms_lock = rooms.lock().unwrap();
+            if let Some(room) = rooms_lock.get(&client.current_room) {
+                room.get_name().to_string() // Clone the room name
+            } else {
+                client.send_to("You are in a non-existent room.\n");
+                return;
+            }
+        };
+
+        // Broadcast to the room
+        Room::broadcast(&room_name, &username, msg, clients);
     }
 }
-
 
 fn handle_client(
     mut client: Client,
@@ -235,11 +239,6 @@ fn handle_client(
     client.send_to("1. Sign up\n2. Sign in\nPlease choose (1|2): ");
 
     loop {
-        if client.mark_disconnected {
-            println!("Client {} disconnected by command.", client.address);
-            return;
-        }
-
         let bytes_read = match client.stream.read(&mut buffer) {
             Ok(0) => {
                 println!("Client {} disconnected.", client.address);
@@ -275,7 +274,7 @@ fn handle_client(
                             clients.lock().unwrap().insert(username.clone(), Arc::new(Mutex::new(client.clone())));
                             let mut rooms_lock = rooms.lock().unwrap();
                             rooms_lock.get_mut("main").unwrap().add_member(username);
-                            client.send_to("You have joined the 'main' room.\n");
+                            client.send_to("You have joined the 'main' room.\n> ");
                         }
                         Err(err) => {
                             client.send_to(&format!("{}\n", err));
@@ -318,6 +317,7 @@ fn handle_client(
         if input.starts_with('/') {
             parse_command(&input, &mut client, &db, &rooms, &clients);
             if client.mark_disconnected {
+                println!("Client {} disconnected by command.", client.address);
                 return;
             }
         } else if !input.is_empty() {
