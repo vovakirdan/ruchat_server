@@ -1,49 +1,59 @@
-use std::collections::HashMap;
+// room.rs
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use crate::client::Client;
 
+#[derive(Debug)]
 pub struct Room {
     name: String,
-    members: Vec<String>, // Just store usernames
+    members: Arc<Mutex<HashSet<Client>>>, // теперь храним Client
 }
 
 impl Room {
     pub fn new(name: &str) -> Self {
         Self {
             name: name.to_string(),
-            members: Vec::new(),
+            members: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
-    pub fn add_member(&mut self, username: String) {
-        if !self.members.contains(&username) {
-            self.members.push(username);
+    pub fn add_member(&self, client: Client) {
+        if let Ok(mut members) = self.members.lock() {
+            members.insert(client);
+        } else {
+            eprintln!("Failed to lock members for room {}", self.name);
         }
     }
 
-    pub fn remove_member(&mut self, username: &str) {
-        self.members.retain(|u| u != username);
+    pub fn remove_member(&self, client: &Client) {
+        if let Ok(mut members) = self.members.lock() {
+            members.remove(client);
+        } else {
+            eprintln!("Failed to lock members for room {}", self.name);
+        }
+    }
+
+    pub fn broadcast(&self, message: &str) {
+        if let Ok(members) = self.members.lock() {
+            for member in members.iter() {
+                member.send_message(&format!("{}\n> ", message));
+            }
+        } else {
+            eprintln!("Failed to lock members for broadcasting in room {}", self.name);
+        }
     }
 
     pub fn get_name(&self) -> &str {
         &self.name
     }
 
-    pub fn broadcast(
-        room_name: &str,
-        sender: &str,
-        message: &str,
-        clients: &Arc<Mutex<HashMap<String, Arc<Mutex<Client>>>>>,
-    ) {
-        let clients_lock = clients.lock().unwrap();
-        for (_, client_arc) in clients_lock.iter() {
-            let mut client = client_arc.lock().unwrap();
-            if client.current_room == room_name && client.is_logged_in && client.username.as_deref() != Some(sender) {
-                client.send_to(&format!("\n[{}] {}: {}\n> ", room_name, sender, message));
-            }
+    pub fn get_members(&self) -> Vec<Client> {
+        if let Ok(members) = self.members.lock() {
+            members.iter().cloned().collect()
+        } else {
+            eprintln!("Failed to lock members for room {}", self.name);
+            Vec::new()
         }
-        // Print to the server's console for logging/debugging
-        println!("[{}] {}: {}", room_name, sender, message);
     }
 }

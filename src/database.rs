@@ -3,12 +3,14 @@ use std::collections::HashMap;
 
 pub struct Database {
     users: HashMap<String, User>,
+    rooms: Vec<String>,
 }
 
 impl Database {
     pub fn new() -> Self {
         Self {
             users: HashMap::new(),
+            rooms: vec!["main".to_string()],
         }
     }
 
@@ -49,5 +51,21 @@ impl Database {
                 }
             })
             .collect()
+    }
+
+    pub fn add_room(&mut self, room_name: &str) -> Result<String, String> {
+        if self.rooms.contains(&room_name.to_string()) {
+            return Err("Room already exists.".to_string());
+        }
+        self.rooms.push(room_name.to_string());
+        Ok(format!("Room '{}' created.", room_name))
+    }
+
+    pub fn room_exists(&self, room_name: &str) -> bool {
+        self.rooms.contains(&room_name.to_string())
+    }
+
+    pub fn list_rooms(&self) -> Vec<String> {
+        self.rooms.clone()
     }
 }

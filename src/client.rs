@@ -1,52 +1,63 @@
-use std::net::TcpStream;
+// client.rs
 use std::io::Write;
-use std::clone::Clone;
+use std::net::TcpStream;
+use std::sync::{Arc, Mutex};
+use std::hash::{Hash, Hasher};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Client {
     pub address: String,
-    pub stream: TcpStream,
+    pub stream: Arc<Mutex<TcpStream>>,
+    pub username: String,
+}
+
+// Состояние клиента: логин, текущая комната и прочие динамические параметры
+#[derive(Debug)]
+pub struct ClientState {
+    pub current_room: Option<String>,
     pub is_logged_in: bool,
-    pub username: Option<String>,
-    pub current_room: String,
     pub mark_disconnected: bool,
 }
 
 impl Client {
-    pub fn new(stream: TcpStream) -> Self {
+    pub fn new(stream: TcpStream) -> (Self, Arc<Mutex<ClientState>>) {
         let address = stream.peer_addr().unwrap().to_string();
-        Self {
+        let stream = Arc::new(Mutex::new(stream));
+        let client = Self {
             address,
             stream,
+            username: String::new(),
+        };
+        let state = Arc::new(Mutex::new(ClientState {
+            current_room: None,
             is_logged_in: false,
-            username: None,
-            current_room: String::new(),
             mark_disconnected: false,
-        }
+        }));
+        (client, state)
     }
 
-    pub fn send_to(&mut self, message: &str) {
-        if let Err(e) = self.stream.write_all(message.as_bytes()) {
-            eprintln!("Failed to send message to {}: {}", self.address, e);
+    pub fn send_message(&self, message: &str) {
+        if let Ok(mut stream) = self.stream.lock() {
+            if let Err(e) = stream.write_all(message.as_bytes()) {
+                eprintln!("Failed to send message to {}: {}", self.address, e);
+            }
+        } else {
+            eprintln!("Failed to lock stream for {}", self.address);
         }
     }
 }
 
-// Implement Clone manually, ignoring the non-cloneable TcpStream by using peer_addr again.
-// Actually, for simplicity in this example, we will just derive Clone for fields that can be cloned,
-// and skip the stream in the clone. The cloned client won't be fully functional, but we only clone
-// this struct to store minimal info in the clients map. Another approach would be to store just the username.
-impl Clone for Client {
-    fn clone(&self) -> Self {
-        // Not fully functional clone (stream not cloned)
-        // but good enough for username/address references.
-        Self {
-            address: self.address.clone(),
-            stream: self.stream.try_clone().expect("Failed to clone stream"),
-            is_logged_in: self.is_logged_in,
-            username: self.username.clone(),
-            current_room: self.current_room.clone(),
-            mark_disconnected: self.mark_disconnected,
-        }
+impl PartialEq for Client {
+    fn eq(&self, other: &Self) -> bool {
+        self.address == other.address && self.username == other.username
+    }
+}
+
+impl Eq for Client {}
+
+impl Hash for Client {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.address.hash(state);
+        self.username.hash(state);
     }
 }
