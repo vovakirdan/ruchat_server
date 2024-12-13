@@ -147,18 +147,24 @@ fn parse_command(
                 return;
             }
 
-            // Remove user from old room
             if let Some(username) = &client.username {
+                // remove client from current room
                 if let Some(old_room) = rooms_lock.get_mut(&client.current_room) {
                     old_room.remove_member(username);
                 }
-                // Add user to new room
+
+                // add client to new room
                 if let Some(new_room) = rooms_lock.get_mut(room_name) {
                     new_room.add_member(username.clone());
                 }
 
-                client.current_room = room_name.to_string();
-                client.send_to(&format!("Switched to room '{}'.\n", room_name));
+                // refresh `clients`
+                let clients_lock = clients.lock().unwrap();
+                if let Some(client_arc) = clients_lock.get(username) {
+                    let mut client_guard = client_arc.lock().unwrap();
+                    client_guard.current_room = room_name.to_string();
+                    client_guard.send_to(&format!("Switched to room '{}'.\n", room_name));
+                }
             }
         }
         _ => {
@@ -170,17 +176,33 @@ fn parse_command(
 
 fn handle_message(
     msg: &str,
-    client: &mut Client,
-    rooms: &Arc<Mutex<std::collections::HashMap<String, Room>>>,
+    client_username: &str,
     clients: &Arc<Mutex<std::collections::HashMap<String, Arc<Mutex<Client>>>>>,
 ) {
-    if msg.starts_with('@') {
-        // Parse private message
-        let parts: Vec<&str> = msg.splitn(2, ' ').collect();
-        if parts.len() < 2 {
-            client.send_to("Usage: @username message\n");
+    // Найти клиента-отправителя и сохранить его данные
+    let (sender_name, current_room) = {
+        let clients_lock = clients.lock().unwrap();
+        if let Some(client_arc) = clients_lock.get(client_username) {
+            let client = client_arc.lock().unwrap();
+            (client.username.clone().unwrap(), client.current_room.clone())
+        } else {
+            eprintln!("Client '{}' not found.", client_username);
             return;
         }
+    };
+
+    if msg.starts_with('@') {
+        // Обработка личного сообщения
+        let parts: Vec<&str> = msg.splitn(2, ' ').collect();
+        if parts.len() < 2 {
+            let clients_lock = clients.lock().unwrap();
+            if let Some(client_arc) = clients_lock.get(client_username) {
+                let mut client = client_arc.lock().unwrap();
+                client.send_to("Usage: @username message\n");
+            }
+            return;
+        }
+
         let recipient = parts[0].trim_start_matches('@');
         let message = parts[1];
 
@@ -190,40 +212,37 @@ fn handle_message(
             if target_client.is_logged_in {
                 target_client.send_to(&format!(
                     "(Private) {}: {}\n> ",
-                    client.username.as_ref().unwrap(),
+                    sender_name,
                     message
                 ));
-                client.send_to("(Private) Message sent successfully.\n> ");
-            } else {
+                if let Some(client_arc) = clients_lock.get(client_username) {
+                    let mut client = client_arc.lock().unwrap();
+                    client.send_to("(Private) Message sent successfully.\n> ");
+                }
+            } else if let Some(client_arc) = clients_lock.get(client_username) {
+                let mut client = client_arc.lock().unwrap();
                 client.send_to("The user is not online.\n> ");
             }
-        } else {
+        } else if let Some(client_arc) = clients_lock.get(client_username) {
+            let mut client = client_arc.lock().unwrap();
             client.send_to("User not found.\n> ");
         }
     } else {
-        // Broadcast to the room
-        if client.current_room.is_empty() {
-            client.send_to("You are not in a room.\n");
-            return;
-        }
-
-        let username = match &client.username {
-            Some(u) => u.clone(),
-            None => return,
-        };
-
-        let room_name = {
-            let rooms_lock = rooms.lock().unwrap();
-            if let Some(room) = rooms_lock.get(&client.current_room) {
-                room.get_name().to_string() // Clone the room name
-            } else {
-                client.send_to("You are in a non-existent room.\n");
-                return;
+        // Broadcast в комнату
+        let clients_lock = clients.lock().unwrap();
+        for (_, target_client_arc) in clients_lock.iter() {
+            let mut target_client = target_client_arc.lock().unwrap();
+            // Проверяем условия:
+            // - Другой пользователь (не отправитель)
+            // - В той же комнате
+            // - Залогинен
+            if target_client.username.as_ref().map(|u| u != &sender_name).unwrap_or(false)
+                && target_client.current_room == current_room
+                && target_client.is_logged_in
+            {
+                target_client.send_to(&format!("{}: {}\n", sender_name, msg));
             }
-        };
-
-        // Broadcast to the room
-        Room::broadcast(&room_name, &username, msg, clients);
+        }
     }
 }
 
@@ -322,7 +341,7 @@ fn handle_client(
             }
         } else if !input.is_empty() {
             // Broadcast message to the current room
-            handle_message(&input, &mut client, &rooms, &clients);
+            handle_message(&input, client.username.as_deref().unwrap_or(""), &clients);
         }
 
         if client.is_logged_in {
